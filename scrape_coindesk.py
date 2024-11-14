@@ -80,6 +80,27 @@ def extract_content(url):
         # Parse HTML for CoinDesk specific date formats
         soup = BeautifulSoup(downloaded, 'html.parser')
         
+        # Add title extraction
+        title = None
+
+        # Try to get title from article header
+        title_element = soup.find('h1', class_='at-headline')
+        if title_element:
+            title = title_element.text.strip()
+            logging.info(f"Found title from header: {title}")
+
+        # Fallback to metadata title
+        if not title and metadata and metadata.title:
+            title = metadata.title.strip()
+            logging.info(f"Found title from metadata: {title}")
+
+        # Fallback to HTML title tag
+        if not title:
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.text.strip()
+                logging.info(f"Found title from title tag: {title}")
+        
         # Extract editor
         editor_element = soup.find('p', class_='kDZZDY')
         if editor_element:
@@ -122,6 +143,7 @@ def extract_content(url):
                 author = str(metadata.author) if metadata.author else None
         
         result = {
+            "title": title,
             "content": extracted_content,
             "published_time": published_time,
             "updated_time": updated_time,
