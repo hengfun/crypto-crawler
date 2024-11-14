@@ -63,6 +63,27 @@ def extract_content_with_selenium(url):
         driver.get(url)
         time.sleep(random.uniform(5, 10))  # Wait for page load
         
+        html_content = driver.page_source
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Updated view count extraction
+        views = 0
+        try:
+            # Wait for the views element to be present
+            view_elements = driver.find_elements(By.CSS_SELECTOR, "span.text-black.text-13.font-semibold")
+            for element in view_elements:
+                text = element.text.strip()
+                if text.isdigit() and len(text) > 0:
+                    views = int(text)
+                    # Usually the first number we find is the view count
+                    break
+            logging.debug(f"Found view count: {views}")
+        except Exception as e:
+            logging.warning(f"Error extracting view count: {str(e)}")
+            
+        html_content = driver.page_source
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
         # Log the page source for debugging
         html_content = driver.page_source
         logging.debug(f"Page source length: {len(html_content)}")
@@ -153,7 +174,7 @@ def extract_content_with_selenium(url):
             'url': url,
             'author': author,
             'time_published': time_published,
-            'views': 0,
+            'views': views,
             'shares': 0,
             'text': article_text,
             'crawl_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
