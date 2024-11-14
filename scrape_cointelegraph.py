@@ -200,8 +200,24 @@ def extract_content_with_selenium(url):
             author = "Unknown"
             time_published = "Unknown"
 
+        # Extract title
+        title = "Unknown"
+        try:
+            # First try to get title from the title tag
+            title = driver.title
+            if not title:
+                # Fallback to og:title meta tag
+                title_meta = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:title"]')
+                if title_meta:
+                    title = title_meta.get_attribute('content')
+            logging.debug(f"Found title: {title}")
+        except Exception as e:
+            logging.warning(f"Error extracting title: {str(e)}")
+            title = "Unknown"
+
         return {
             'url': url,
+            'title': title,
             'author': author,
             'time_published': time_published,
             'views': views,
@@ -464,6 +480,7 @@ class CointelegraphSpider(Spider):
                 # Create JSON structure
                 json_data = {
                     "url": article_data['url'],
+                    "title": article_data.get('title', 'Unknown'),
                     "author": article_data.get('author', 'Unknown'),
                     "freshness": freshness,
                     "time_published": formatted_published_time,
