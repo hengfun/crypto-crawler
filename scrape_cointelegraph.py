@@ -5,7 +5,7 @@ from scrapy.crawler import CrawlerProcess
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from scrapy.downloadermiddlewares.useragent import UserAgentMiddleware
 import random
@@ -148,17 +148,39 @@ def extract_content_with_selenium(url):
         
         # Get metadata
         try:
-            author_selectors = [
-                'span.post-meta__author-name',
-                'a.article__author-link',
-                'div.article__author'
-            ]
             author = "Unknown"
-            for selector in author_selectors:
-                author_elem = soup.select_one(selector)
-                if author_elem:
-                    author = author_elem.text.strip()
-                    break
+            try:
+                # First try to get author from JSON-LD
+                script_element = driver.find_element(By.CSS_SELECTOR, 'script[data-hid="ldjson-schema"]')
+                if script_element:
+                    json_data = json.loads(script_element.get_attribute('innerHTML'))
+                    if isinstance(json_data, dict) and 'author' in json_data:
+                        author = json_data['author'].get('name', 'Unknown')
+                        logging.debug(f"Found author in JSON-LD: {author}")
+                
+                # If JSON-LD fails, try the existing selectors as fallback
+                if author == "Unknown":
+                    author_selectors = [
+                        'span.post-meta__author-name',
+                        'a.article__author-link', 
+                        'div.article__author',
+                        'a[data-gtm-locator="clickon_author"]',
+                        '[data-testid="article-author"]'
+                    ]
+                    
+                    for selector in author_selectors:
+                        try:
+                            author_element = driver.find_element(By.CSS_SELECTOR, selector)
+                            if author_element:
+                                author = author_element.text.strip()
+                                logging.debug(f"Found author using selector {selector}: {author}")
+                                break
+                        except:
+                            continue
+
+            except Exception as e:
+                logging.warning(f"Error extracting author: {str(e)}")
+                author = "Unknown"
             
             time_selectors = [
                 'time.post-meta__publish-date',
@@ -377,25 +399,83 @@ class CointelegraphSpider(Spider):
             if article_data and article_data.get('text'):
                 # Create output directories
                 output_dir = 'extracted_articles/coin_telegraph'
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                articles_dir = os.path.join(output_dir, timestamp)
-                os.makedirs(articles_dir, exist_ok=True)
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Get the date for the filename
+                published_time = article_data.get('time_published', 'Unknown')
+                if published_time and published_time != 'Unknown':
+                    try:
+                        date_prefix = datetime.strptime(published_time, "%Y-%m-%d %H:%M:%S").strftime('%Y%m%d')
+                    except ValueError:
+                        date_prefix = datetime.now().strftime('%Y%m%d')
+                else:
+                    date_prefix = datetime.now().strftime('%Y%m%d')
 
                 # Extract title from URL for filename
                 url_path = response.url.rstrip('/').split('/')[-1]
-                filename = f"{timestamp}_{url_path}.txt"
-                filepath = os.path.join(articles_dir, filename)
+                filename = f"{date_prefix}_{url_path}.json"
+                filepath = os.path.join(output_dir, filename)
                 
-                # Write content to file
+                # Convert time_published to freshness and calculate actual published time
+                time_str = article_data.get('time_published', 'Unknown')
+                freshness = time_str
+                published_time = None
+                current_time = datetime.now()
+                
+                if time_str != 'Unknown':
+                    if 'ago' in time_str.lower():
+                        # Parse "X hours/minutes/days ago" format
+                        try:
+                            value = int(''.join(filter(str.isdigit, time_str)))
+                            if 'hour' in time_str.lower():
+                                published_time = current_time - timedelta(hours=value)
+                                freshness = f"{value} hours ago"
+                            elif 'minute' in time_str.lower():
+                                published_time = current_time - timedelta(minutes=value)
+                                freshness = f"{value} minutes ago"
+                            elif 'day' in time_str.lower():
+                                published_time = current_time - timedelta(days=value)
+                                freshness = f"{value} days ago"
+                        except ValueError:
+                            self.logger.warning(f"Could not parse 'ago' time: {time_str}")
+                    else:
+                        # Try to parse various date formats
+                        for fmt in ["%B %d, %Y", "%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]:
+                            try:
+                                published_time = datetime.strptime(time_str, fmt)
+                                time_diff = current_time - published_time
+                                
+                                if time_diff.days > 0:
+                                    freshness = f"{time_diff.days} days ago"
+                                else:
+                                    hours = time_diff.seconds // 3600
+                                    if hours > 0:
+                                        freshness = f"{hours} hours ago"
+                                    else:
+                                        minutes = (time_diff.seconds % 3600) // 60
+                                        freshness = f"{minutes} minutes ago"
+                                break
+                            except ValueError:
+                                continue
+                
+                # Format published_time if it exists
+                formatted_published_time = published_time.strftime("%Y-%m-%d %H:%M:%S") if published_time else "Unknown"
+                
+                # Create JSON structure
+                json_data = {
+                    "url": article_data['url'],
+                    "author": article_data.get('author', 'Unknown'),
+                    "freshness": freshness,
+                    "time_published": formatted_published_time,
+                    "views": article_data.get('views', 0),
+                    "shares": article_data.get('shares', 0),
+                    "crawl_time": article_data['crawl_time'],
+                    "content": article_data['text']
+                }
+                
+                # Write content to JSON file
                 with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(f"URL: {article_data['url']}\n")
-                    f.write(f"Author: {article_data.get('author', 'Unknown')}\n")
-                    f.write(f"Time Published: {article_data.get('time_published', 'Unknown')}\n")
-                    f.write(f"Views: {article_data.get('views', 0)}\n")
-                    f.write(f"Shares: {article_data.get('shares', 0)}\n")
-                    f.write(f"Crawl Time: {article_data['crawl_time']}\n\n")
-                    f.write("Content:\n\n")
-                    f.write(article_data['text'])
+                    json.dump(json_data, f, ensure_ascii=False, indent=4)
                 
                 self.logger.info(f"Successfully saved article to {filepath}")
                 
