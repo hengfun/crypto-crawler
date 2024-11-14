@@ -68,18 +68,26 @@ def extract_content_with_selenium(url):
         
         # Updated view count extraction
         views = 0
+        shares = 0
         try:
-            # Wait for the views element to be present
-            view_elements = driver.find_elements(By.CSS_SELECTOR, "span.text-black.text-13.font-semibold")
-            for element in view_elements:
+            # Find all elements with the same class pattern
+            number_elements = driver.find_elements(By.CSS_SELECTOR, "span.text-black.text-13.font-semibold")
+            for element in number_elements:
                 text = element.text.strip()
-                if text.isdigit() and len(text) > 0:
-                    views = int(text)
-                    # Usually the first number we find is the view count
-                    break
+                if text.isdigit():
+                    # Get the following span to determine if this is views or shares
+                    parent = element.find_element(By.XPATH, "./..")
+                    label = parent.find_element(By.CSS_SELECTOR, "span.text-13.text-custom-coh-gray-dark.font-light").text.strip()
+                    
+                    if "Total views" in label:
+                        views = int(text)
+                    if "Total shares" in label:
+                        shares = int(text)
+            
             logging.debug(f"Found view count: {views}")
+            logging.debug(f"Found share count: {shares}")
         except Exception as e:
-            logging.warning(f"Error extracting view count: {str(e)}")
+            logging.warning(f"Error extracting views/shares: {str(e)}")
             
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -175,7 +183,7 @@ def extract_content_with_selenium(url):
             'author': author,
             'time_published': time_published,
             'views': views,
-            'shares': 0,
+            'shares': shares,
             'text': article_text,
             'crawl_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'timestamp': datetime.now().isoformat()
@@ -447,7 +455,7 @@ if __name__ == "__main__":
         
         print(f"\nExtraction complete!")
         print(f"Individual articles saved in: {output_dir}/{timestamp}")
-        print(f"Combined JSON saved as: {output_dir}/cointelegraph_articles_{timestamp}.json")
+        # print(f"Combined JSON saved as: {output_dir}/cointelegraph_articles_{timestamp}.json")
         
     except Exception as e:
         logging.error(f"Crawler failed with error: {str(e)}", exc_info=True)
