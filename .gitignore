@@ -1,0 +1,5 @@
+extracted_articles/
+*.html
+*.json
+__pycache__/
+*.log
